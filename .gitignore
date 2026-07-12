@@ -1,0 +1,35 @@
+# Python caches and local environments
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+venv/
+
+# Native build output
+**/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+
+# Generated runtime output
+runs/
+benchmark_results/
+*.log
+wget-log
+*.tmp
+*.bak
+
+# Local tooling and editor state
+.codex_backup*/
+.vscode/
+.idea/
+
+# Keep only the verified, runnable FP16 model.
+*.rknn
+!models/best_n_stage1_512_fp16.rknn

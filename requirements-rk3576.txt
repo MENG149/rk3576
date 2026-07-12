@@ -1,0 +1,8 @@
+# Prefer distro OpenCV/Numpy on RK3576 board images:
+# sudo apt install -y python3-opencv python3-numpy python3-serial
+#
+# Install the matching aarch64 wheel from Rockchip RKNN Toolkit2 if this package
+# is not available through pip on your image.
+rknn-toolkit-lite2==2.3.2
+pyserial>=3.5
+
