@@ -1,132 +1,108 @@
-# RK3576 RKNN USB Targeting
+# RK3576 C++ RKNN Targeting
 
-Slim high-FPS RK3576 runtime for USB camera targeting.
+这是 RK3576 二维云台目标识别项目的 C++ 运行版本。仓库只保留已验证的 FP16 模型和 C++ 推理链路，不再包含旧 Python 运行代码。
 
-Core path:
+当前板端验证结果：
 
-```text
-USB camera -> RKNNLite inference -> YOLO decode/NMS -> tracker -> $AIM serial output
-```
+- 识别一致性：207/207 张图片与旧输入路径一致，mismatches=0。
+- RKNN 输入：默认 auto，优先使用原生 FP16 zero-copy，失败时自动回退 legacy。
+- 延迟中位数：set 约 1.1 ms，total 约 13.6 ms，infer 约 73.3 FPS。
+- 相机实际帧率约 27.5 FPS，当前上限来自摄像头采集。
+- 性能模式使用 performance governor，不写 CPU scaling_setspeed。
 
-The RKNN model inference path is kept. Browser preview, JSON/binary protocols, geometry refinement, tests, and cache files are removed from the runtime version.
+## 目录
 
-## Files
+~~~text
+rk3576_rknn_targeting/
+|-- README.md
+|-- cpp_fast_targeting/     C++ 源码、CMake、测试和运行脚本
+|-- models/                 已验证的 FP16 RKNN 模型
+|-- tools/                  RK3576 性能与诊断工具
++-- docs/                   指南、报告、参考资料和历史文档
+~~~
 
-- `run_usb_rknn.py`: runtime entry and main loop.
-- `rknn_target/rknn_runtime.py`: RKNNLite model load, NPU core mask, inference, release.
-- `rknn_target/worker.py`: background RKNN inference workers.
-- `rknn_target/postprocess.py`: letterbox preprocessing, YOLO decode, NMS.
-- `rknn_target/io.py`: USB camera latest-frame capture and `$AIM` serial/stdout output.
-- `rknn_target/tracker.py`: target smoothing and short miss prediction.
-- `rknn_target/debug.py`: optional local OpenCV window.
-- `tools/rk3576_performance.sh`: board performance frequency setup.
-- `tools/benchmark_rk3576_modes.sh`: worker/core-mask comparison.
+唯一运行模型：
 
-## Model
+~~~text
+models/best_n_stage1_512_fp16.rknn
+~~~
 
-Default model path:
+## 板端依赖
 
-```text
-models/best_rk3576_int8.rknn
-```
+需要 RK3576 aarch64 Linux、CMake 3.16+、支持 C++17 的编译器、OpenCV、librknnrt，以及可选的 librga。
 
-Recommended model route:
-
-```text
-best.pt -> best.onnx -> best_rk3576_int8.rknn
-static 640, batch=1, INT8, target=rk3576
-```
-
-## Board Dependencies
-
-On RK3576 Linux:
-
-```bash
+~~~bash
 sudo apt update
-sudo apt install -y python3-opencv python3-numpy python3-serial
-pip3 install -r requirements-rk3576.txt
-```
+sudo apt install -y build-essential cmake pkg-config libopencv-dev
+~~~
 
-If `rknn-toolkit-lite2` cannot be installed by pip, use the matching Rockchip aarch64 wheel for the board image and Python version.
+librknnrt 和 librga 应使用板卡系统或 Rockchip SDK 对应版本。
 
-## Fast Run
+## Release 编译
 
-Apply performance settings first:
+在板端执行：
 
-```bash
-sudo bash tools/rk3576_performance.sh
-```
+~~~bash
+cd ~/rk3576_rknn_targeting/cpp_fast_targeting
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRKFAST_USE_RGA=ON
+cmake --build build --parallel "$(nproc)"
+~~~
 
-Run the default high-FPS command:
+也可以运行完整构建检查：
 
-```bash
-bash run_fast_rk3576.sh
-```
+~~~bash
+cd ~/rk3576_rknn_targeting/cpp_fast_targeting
+bash build_and_verify.sh
+~~~
 
-Equivalent command:
+## 运行
 
-```bash
-python3 run_usb_rknn.py \
-  --model models/best_rk3576_int8.rknn \
-  --camera /dev/video73 --width 640 --height 480 --fps 60 \
-  --fourcc MJPG --fast --workers 2 --worker-core-masks 0,1 \
-  --no-window --output-on-result \
-  --serial-port /dev/ttyUSB0 --baudrate 115200 --serial-interval 0.02
-```
+默认使用 /dev/video73、NPU 双核 01、FP16 auto 输入模式，并自动应用性能 governor：
 
-## Local Window
+~~~bash
+cd ~/rk3576_rknn_targeting/cpp_fast_targeting
+bash run_camera.sh
+~~~
 
-Use `--window` when you need to see the camera image and target overlay on the board:
+发送串口 AIM 数据：
 
-```bash
-python3 run_usb_rknn.py \
-  --model models/best_rk3576_int8.rknn \
-  --camera /dev/video73 --width 640 --height 480 --fps 60 \
-  --fourcc MJPG --fast --workers 2 --worker-core-masks 0,1 \
-  --window --display-interval 2 --output-on-result \
-  --serial-port /dev/ttyUSB0 --baudrate 115200 --serial-interval 0.02
-```
+~~~bash
+bash run_camera.sh --serial /dev/ttyS4
+~~~
 
-The default is `--no-window` because drawing slows the loop.
+常用诊断参数：
 
-## Output
+~~~bash
+bash run_camera.sh --no-perf
+bash run_camera.sh --camera /dev/video0
+bash run_camera.sh --input-mode legacy
+bash run_camera.sh --core-mask 01
+~~~
 
-The only runtime protocol is one ASCII `$AIM` line:
+run_camera.sh 内的识别阈值、线程亲和性和相机参数是当前板端验证配置，不建议在未重新对比识别结果和连续多次帧率测试前修改。
 
-```text
+## 输出
+
+程序向标准输出或串口发送 ASCII AIM 行：
+
+~~~text
 $AIM,1,LOCKED,320.4,241.6,-12.0,8.0,0.876,rknn
-```
+~~~
 
-Fields:
+字段依次为 found、state、目标中心、相对画面中心偏移、置信度和来源。
 
-```text
-prefix,found,state,cx,cy,dx_px,dy_px,confidence,source
-```
+## 单元测试
 
-`dx_px` and `dy_px` are pixel offsets from the camera image center to the target center.
+测试只覆盖不依赖 NPU 的坐标、矩形精修和跟踪逻辑：
 
-## Benchmark
+~~~bash
+cmake -S cpp_fast_targeting/tests -B cpp_fast_targeting/tests/build -DCMAKE_BUILD_TYPE=Release
+cmake --build cpp_fast_targeting/tests/build --parallel
+ctest --test-dir cpp_fast_targeting/tests/build --output-on-failure
+~~~
 
-Compare RKNN worker/core-mask modes:
+完整 RKNN、RGA、相机和串口验证必须在 RK3576 板端进行。
 
-```bash
-bash tools/benchmark_rk3576_modes.sh
-```
+## 文档
 
-Stats include:
-
-```text
-stats frame_fps=... infer_fps=... pre=...ms rknn=...ms post=...ms select=...ms total=...ms
-```
-
-If `rknn` dominates, the RKNN model/runtime is the bottleneck. If `post` or `select` dominates, use `--fast` and `--max-det 1`.
-
-## Verification
-
-Local syntax check:
-
-```bash
-python -m py_compile run_usb_rknn.py rknn_target/*.py
-```
-
-Full RKNN verification must run on the RK3576 board.
+当前指南和历史资料统一收录在 docs/，入口见 docs/README.md。性能优化细节见 docs/reports/RK3576_矩形识别修复与性能优化报告_2026-07-12.md。

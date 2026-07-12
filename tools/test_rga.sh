@@ -1,6 +1,10 @@
 #!/bin/bash
 # RGA Hardware Test and Diagnostic Tool
 
+set -u
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
 echo "====================================="
 echo "RK3576 RGA Hardware Diagnostic"
 echo "====================================="

@@ -325,7 +325,7 @@ newgrp video
 # 检查模型是否存在
 find ~/rk3576_rknn_targeting -name '*.rknn'
 # 使用绝对路径或确保相对路径正确
-./rkfast_target --model /home/lckfb/rk3576_rknn_targeting/models/xxx.rknn ...
+./rkfast_target --model /home/user/rk3576_rknn_targeting/models/xxx.rknn ...
 ```
 
 #### 坑7: 相机打开失败

@@ -14,7 +14,7 @@ Keep `README.md` at the repository root. Place every other Markdown document und
 - Python/CMake caches and the local Codex backup.
 - Duplicate or invalid models, logs, partial downloads, and backup files.
 - Unreferenced experimental source files.
-- Duplicate, corrupted, or Python/INT8-only documents.
+- Retired Python/INT8 and duplicate guides move to docs/archive so they cannot be confused with current instructions; unique document content is preserved.
 
 ## Corrections
 

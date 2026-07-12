@@ -4,7 +4,7 @@
 
 ✅ **RGA硬件存在:**
 ```bash
-lckfb@localhost:~/rk3576_rknn_targeting$ ls -l /sys/bus/platform/devices/ | grep rga
+user@localhost:~/rk3576_rknn_targeting$ ls -l /sys/bus/platform/devices/ | grep rga
 lrwxrwxrwx 1 root root 0 Mar 24 21:45 27920000.rga -> ../../../devices/platform/27920000.rga
 lrwxrwxrwx 1 root root 0 Mar 24 21:45 27930000.rga -> ../../../devices/platform/27930000.rga
 ```
@@ -154,8 +154,8 @@ IM_STATUS imresize_t(rga_buffer_t src, rga_buffer_t dst,
 
 ```bash
 # 添加用户到正确的组
-sudo usermod -aG video lckfb
-sudo usermod -aG render lckfb
+sudo usermod -aG video user
+sudo usermod -aG render user
 
 # 设置udev规则
 sudo tee /etc/udev/rules.d/99-rga.rules << EOF
