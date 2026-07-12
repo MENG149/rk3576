@@ -33,3 +33,4 @@ wget-log
 # Keep only the verified, runnable FP16 model.
 *.rknn
 !models/best_n_stage1_512_fp16.rknn
+*.rknn.filepart
