@@ -14,7 +14,7 @@ set(RKFAST_OPENCV_TARGET "")
 set(RKFAST_OPENCV_INCLUDE_DIRS "")
 set(RKFAST_OPENCV_LIBS "")
 
-find_package(OpenCV QUIET COMPONENTS core imgproc videoio highgui)
+find_package(OpenCV QUIET COMPONENTS core imgproc video videoio highgui)
 if(OpenCV_FOUND)
   set(RKFAST_OPENCV_INCLUDE_DIRS ${OpenCV_INCLUDE_DIRS})
   set(RKFAST_OPENCV_LIBS ${OpenCV_LIBS})
@@ -85,33 +85,6 @@ else()
   set(RKFAST_HAS_RGA FALSE)
 endif()
 
-if(RKFAST_USE_RGA)
-  find_path(
-    RGA_INCLUDE_DIR
-    NAMES rga/RgaApi.h rga/im2d.h
-    PATHS
-      /usr/include
-      /usr/local/include
-  )
-  find_library(
-    RGA_LIB
-    NAMES rga librga
-    PATHS
-      /usr/lib
-      /usr/local/lib
-      /usr/lib/aarch64-linux-gnu
-  )
-  if(RGA_INCLUDE_DIR AND RGA_LIB)
-    message(STATUS "RGA found: ${RGA_LIB}")
-    set(RKFAST_HAS_RGA TRUE)
-  else()
-    message(WARNING "RGA requested but not found, disabling RGA support")
-    set(RKFAST_HAS_RGA FALSE)
-  endif()
-else()
-  set(RKFAST_HAS_RGA FALSE)
-endif()
-
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_INCLUDES ${RKNN_API_INCLUDE_DIR})
 set(CMAKE_REQUIRED_LIBRARIES ${RKNN_API_LIB})
@@ -138,9 +111,11 @@ set(RKFAST_SOURCES
   src/camera_source.cpp
   src/config.cpp
   src/main.cpp
+  src/mjpeg_server.cpp
   src/rect_refiner.cpp
   src/rga_preprocess.cpp
   src/rknn_detector.cpp
+  src/target_plane.cpp
   src/thread_affinity.cpp
   src/tracker.cpp
 )
@@ -185,7 +160,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
       -Wextra
       -Wpedantic
       $<$<CONFIG:Release>:-O3>
-      $<$<CONFIG:Release>:-ffast-math>
+      # NOTE: -ffast-math is intentionally NOT enabled. It implies
+      # -ffinite-math-only, which lets the compiler assume NaN/Inf never occur
+      # and optimize away the std::isfinite() guards that the decode, tracker
+      # and geometry paths rely on to fail closed on bad model/camera output.
+      # The two flags below are safe: they only affect errno/trap behavior,
+      # not the value semantics of NaN/Inf, so isfinite() still works.
       $<$<CONFIG:Release>:-fno-math-errno>
       $<$<CONFIG:Release>:-fno-trapping-math>
   )

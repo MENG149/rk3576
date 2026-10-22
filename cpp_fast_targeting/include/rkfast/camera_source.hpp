@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -10,6 +12,7 @@
 #include <opencv2/videoio.hpp>
 
 #include "rkfast/config.hpp"
+#include "rkfast/types.hpp"
 
 namespace rkfast {
 
@@ -22,12 +25,15 @@ class CameraSource {
   void Close();
 
   bool ReadLatest(cv::Mat* frame, double* timestamp, uint64_t* seq) const;
+  bool WaitLatest(uint64_t after_seq, FramePacket* packet,
+                  std::chrono::milliseconds timeout) const;
 
  private:
   void CaptureLoop();
 
   AppConfig config_;
   mutable std::mutex mutex_;
+  mutable std::condition_variable frame_cv_;
   cv::VideoCapture cap_;
   cv::Mat latest_;
   double timestamp_ = 0.0;

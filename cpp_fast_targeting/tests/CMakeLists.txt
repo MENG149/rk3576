@@ -11,7 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(RKFAST_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-find_package(OpenCV QUIET COMPONENTS core imgproc)
+find_package(OpenCV QUIET COMPONENTS core imgproc video)
 if(NOT OpenCV_FOUND)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(OPENCV4 REQUIRED IMPORTED_TARGET opencv4)
@@ -21,6 +21,7 @@ add_executable(rkfast_tests
   rkfast_tests.cpp
   ${RKFAST_ROOT}/src/config.cpp
   ${RKFAST_ROOT}/src/rect_refiner.cpp
+  ${RKFAST_ROOT}/src/target_plane.cpp
   ${RKFAST_ROOT}/src/tracker.cpp
 )
 

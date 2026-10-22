@@ -26,6 +26,11 @@ class RectRefiner {
       const cv::Rect& roi,
       const cv::Point2f& target_center,
       const RefineHints& hints) const;
+  // Centroid of red pixels inside the refined quad (full-frame coords). Scans
+  // only the HSV of the already-cropped ROI, masked to the quad interior.
+  std::optional<cv::Point2f> DetectRedCenter(
+      const cv::Mat& roi_bgr, const cv::Rect& roi,
+      const std::array<cv::Point2f, 4>& corners, int* red_pixels) const;
   static std::array<cv::Point2f, 4> OrderCorners(const std::vector<cv::Point>& polygon);
   static float RightAngleScore(const std::array<cv::Point2f, 4>& corners);
   static void RefineCornersSubPix(const cv::Mat& gray, const cv::Rect& roi,

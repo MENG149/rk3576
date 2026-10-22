@@ -32,6 +32,21 @@ struct RefinedRect {
   cv::Point2f center{0.0f, 0.0f};
   std::array<cv::Point2f, 4> corners{};
   float score = 0.0f;
+  // Centroid of red pixels inside the refined quad (image coords), when the
+  // real target's red concentric rings / center dot are visible. This is the
+  // physical bullseye and the preferred aim point; empty on the plain
+  // black-frame dataset, so downstream aim falls back to the frame center.
+  std::optional<cv::Point2f> red_center;
+  int red_pixels = 0;  // red pixel count backing red_center (0 = none)
+};
+
+// A camera frame and the monotonic timestamp recorded immediately after the
+// backend returned it. The timestamp is deliberately not called exposure_ts:
+// OpenCV does not expose a reliable sensor exposure timestamp on this path.
+struct FramePacket {
+  cv::Mat frame;
+  double capture_done_ts = 0.0;
+  uint64_t seq = 0;
 };
 
 // Optional context passed from the tracker into the refiner so candidate
@@ -56,6 +71,14 @@ struct TrackSnapshot {
   int misses = 0;
   std::string state = "SEARCHING";
   std::string source = "none";
+  uint64_t query_frame_seq = 0;
+  uint64_t last_measurement_frame_seq = 0;
+  double state_ts = 0.0;
+  double last_measurement_ts = 0.0;
+  double publish_ts = 0.0;
+  double state_age_ms = 0.0;
+  double measurement_age_ms = 0.0;
+  bool predicted_only = false;
 };
 
 struct InferTimings {
@@ -73,10 +96,40 @@ struct InferTimings {
 
 struct InferResult {
   uint64_t seq = 0;
+  uint64_t source_frame_seq = 0;
   std::optional<Detection> detection;
+  // Processing-capacity FPS: reciprocal of one detector invocation.
   double infer_fps = 0.0;
+  // Actual completion cadence, including scheduling gaps.
+  double actual_fps = 0.0;
+  double source_capture_ts = 0.0;
+  double infer_start_ts = 0.0;
+  double infer_done_ts = 0.0;
+  // Compatibility alias for infer_done_ts.
   double timestamp = 0.0;
   InferTimings timings;
+};
+
+struct VisualEstimate {
+  uint64_t query_frame_seq = 0;
+  uint64_t last_measurement_frame_seq = 0;
+  double state_ts = 0.0;
+  double last_measurement_ts = 0.0;
+  double publish_ts = 0.0;
+  double state_age_ms = 0.0;
+  double measurement_age_ms = 0.0;
+  std::string state = "SEARCHING";
+  std::string source = "none";
+  Box box;
+  std::array<cv::Point2f, 4> corners{};
+  bool has_corners = false;
+  bool has_valid_homography = false;
+  cv::Point2f target_center_px{0.0f, 0.0f};
+  cv::Matx33f image_to_target = cv::Matx33f::eye();
+  cv::Matx33f target_to_image = cv::Matx33f::eye();
+  float vx_px_s = 0.0f;
+  float vy_px_s = 0.0f;
+  float confidence = 0.0f;
 };
 
 inline double NowSeconds() {
@@ -85,6 +138,10 @@ inline double NowSeconds() {
 }
 
 inline float ClampFloat(float value, float low, float high) {
+  return std::max(low, std::min(high, value));
+}
+
+inline int ClampInt(int value, int low, int high) {
   return std::max(low, std::min(high, value));
 }
 

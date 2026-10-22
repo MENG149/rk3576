@@ -85,7 +85,6 @@ echo "Running cmake -DCMAKE_BUILD_TYPE=Release -DRKFAST_USE_RGA=ON ..."
 if cmake -S . -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DRKFAST_USE_RGA=ON \
-    -DCMAKE_CXX_FLAGS="-march=armv8.2-a -mtune=cortex-a76" \
     2>&1 | tee "${CMAKE_LOG}"; then
   ok "CMake configuration succeeded"
 else
@@ -146,7 +145,7 @@ fi
 # Print size
 BINARY_SIZE=$(stat -c%s "${BINARY_PATH}" 2>/dev/null || stat -f%z "${BINARY_PATH}" 2>/dev/null || echo "?")
 if [[ "${BINARY_SIZE}" != "?" ]]; then
-  printf "       Size: %'d bytes (%.2f MB)\n" "${BINARY_SIZE}" "$(echo "scale=2; ${BINARY_SIZE}/1024/1024" | bc 2>/dev/null || echo "N/A")"
+  printf "       Size: %s bytes\n" "${BINARY_SIZE}"
 fi
 
 # --- 7. Check dynamic linking (librga + librknnrt) ---------------------------
@@ -220,13 +219,9 @@ if [[ ${OVERALL_STATUS} -eq 0 ]]; then
   echo "  Build type: Release"
   echo "  RGA:        Enabled"
   echo ""
-  echo "Next steps:"
-  echo "  1. Verify the model exists: ../models/best_n_stage1_512_fp16.rknn"
-  echo "  2. Run inference:"
+  echo "Next step:"
   echo ""
-  echo "     ${BINARY_PATH} --model ../models/best_n_stage1_512_fp16.rknn \\"
-  echo "       --camera /dev/video73 --width 640 --height 480 --fps 60 \\"
-  echo "       --fourcc MJPG --no-window"
+  echo "  bash run_camera.sh"
   echo ""
   exit 0
 else

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include <cstddef>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -92,6 +93,13 @@ class RknnDetector {
   RgaPreprocessor rga_preprocessor_;
 };
 
+struct WorkerStats {
+  uint64_t submitted = 0;
+  uint64_t overwritten = 0;
+  uint64_t started = 0;
+  uint64_t completed = 0;
+};
+
 class DetectorWorker {
  public:
   DetectorWorker(std::unique_ptr<RknnDetector> detector, std::string affinity = {});
@@ -100,24 +108,30 @@ class DetectorWorker {
   void Start();
   void Stop();
 
-  bool Submit(const cv::Mat& frame, const std::optional<Box>& prior);
+  bool Submit(const FramePacket& packet, const std::optional<Box>& prior);
   bool Busy() const;
   InferResult LatestResult() const;
+  WorkerStats Stats() const;
 
  private:
   void Run();
 
   mutable std::mutex mutex_;
+  std::condition_variable condition_;
   std::thread thread_;
   std::atomic<bool> stop_{false};
   std::atomic<bool> started_{false};
   bool busy_ = false;
   bool pending_ = false;
-  cv::Mat pending_frame_;
+  FramePacket pending_packet_;
   std::optional<Box> pending_prior_;
   InferResult latest_result_;
   double smoothed_infer_fps_ = 0.0;
+  double smoothed_actual_fps_ = 0.0;
+  double completion_window_start_ = 0.0;
+  uint64_t completion_window_count_ = 0;
   uint64_t sequence_ = 0;
+  WorkerStats stats_;
   std::unique_ptr<RknnDetector> detector_;
   std::string affinity_;
 };

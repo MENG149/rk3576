@@ -339,6 +339,11 @@ std::optional<Detection> RknnDetector::Infer(const cv::Mat& frame,
   for (uint32_t i = 0; i < io_num_.n_output; ++i) {
     outputs[i].want_float = 0;
     outputs[i].is_prealloc = 0;
+    // rknn_api.h documents index as the output selector for rknn_outputs_get.
+    // Leaving it 0 makes every request read output 0 and misassigns attrs the
+    // moment a multi-head / keypoint model is loaded. Harmless for the current
+    // single-output model, required for any future multi-output export.
+    outputs[i].index = i;
   }
 
   const double tg0 = NowSeconds();
@@ -786,7 +791,18 @@ std::vector<Detection> RknnDetector::DecodeOutputs(
       continue;
     }
 
-    if (chosen_class < 0 || score < config_.conf_threshold) {
+    // A NaN score passes "score < conf_threshold" (any comparison with NaN is
+    // false), then poisons the std::sort comparator below (strict-weak-order
+    // violation -> UB) and can be emitted as a bogus detection. Reject it here.
+    if (chosen_class < 0 || !std::isfinite(score) ||
+        score < config_.conf_threshold) {
+      continue;
+    }
+
+    // Non-positive width/height must be rejected BEFORE ClipBox: ClipBox swaps
+    // x2<x1 / y2<y1 into a superficially-valid box, silently turning a garbage
+    // negative-size prediction into a plausible-looking target.
+    if (!(bw > 0.0f) || !(bh > 0.0f)) {
       continue;
     }
 
@@ -795,6 +811,10 @@ std::vector<Detection> RknnDetector::DecodeOutputs(
     box.y1 = (cy - bh * 0.5f - meta.pad_y) / std::max(meta.scale, 1e-6f);
     box.x2 = (cx + bw * 0.5f - meta.pad_x) / std::max(meta.scale, 1e-6f);
     box.y2 = (cy + bh * 0.5f - meta.pad_y) / std::max(meta.scale, 1e-6f);
+    if (!std::isfinite(box.x1) || !std::isfinite(box.y1) ||
+        !std::isfinite(box.x2) || !std::isfinite(box.y2)) {
+      continue;
+    }
     box = ClipBox(box, meta.frame_w, meta.frame_h);
 
     if (BoxWidth(box) < config_.min_box_size ||
@@ -816,8 +836,15 @@ std::vector<Detection> RknnDetector::DecodeOutputs(
               return a.conf > b.conf;
             });
 
+  // Keep up to max(max_det, candidate_pool) post-NMS candidates so the
+  // downstream selector/association has real alternatives even when only one
+  // final target is emitted (max_det=1). Selection to a single target happens
+  // later in ChooseDetection / the tracker, not by starving NMS here.
+  const int pool_cap =
+      std::max(1, std::max(config_.max_det, config_.candidate_pool));
   std::vector<Detection> kept;
-  kept.reserve(std::min<int>(config_.max_det, detections.size()));
+  kept.reserve(std::min<size_t>(static_cast<size_t>(pool_cap),
+                                detections.size()));
   for (const auto& det : detections) {
     bool keep = true;
     for (const auto& prev : kept) {
@@ -832,7 +859,7 @@ std::vector<Detection> RknnDetector::DecodeOutputs(
     auto det_copy = det;
     det_copy.candidate_count = static_cast<int>(detections.size());
     kept.push_back(det_copy);
-    if (static_cast<int>(kept.size()) >= config_.max_det) {
+    if (static_cast<int>(kept.size()) >= pool_cap) {
       break;
     }
   }
@@ -884,20 +911,39 @@ void DetectorWorker::Start() {
 
 void DetectorWorker::Stop() {
   stop_.store(true);
+  condition_.notify_all();
   if (thread_.joinable()) {
     thread_.join();
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    busy_ = false;
+    pending_ = false;
+    pending_packet_ = FramePacket{};
+    pending_prior_.reset();
   }
   started_.store(false);
 }
 
-bool DetectorWorker::Submit(const cv::Mat& frame, const std::optional<Box>& prior) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (busy_ || pending_) {
+bool DetectorWorker::Submit(const FramePacket& packet,
+                            const std::optional<Box>& prior) {
+  if (packet.frame.empty() || stop_.load() || !started_.load()) {
     return false;
   }
-  pending_frame_ = frame;
-  pending_prior_ = prior;
-  pending_ = true;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (stop_.load()) {
+      return false;
+    }
+    ++stats_.submitted;
+    if (pending_) {
+      ++stats_.overwritten;
+    }
+    pending_packet_ = packet;
+    pending_prior_ = prior;
+    pending_ = true;
+  }
+  condition_.notify_one();
   return true;
 }
 
@@ -911,50 +957,73 @@ InferResult DetectorWorker::LatestResult() const {
   return latest_result_;
 }
 
+WorkerStats DetectorWorker::Stats() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return stats_;
+}
+
 void DetectorWorker::Run() {
   std::string affinity_error;
   if (!affinity_.empty() && !BindCurrentThread(affinity_, &affinity_error)) {
     std::cerr << "detector affinity warning: " << affinity_error << "\n";
   }
-  while (!stop_.load()) {
-    cv::Mat frame;
+  while (true) {
+    FramePacket packet;
     std::optional<Box> prior;
     {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (!pending_) {
-        // no-op
-      } else {
-        pending_ = false;
-        busy_ = true;
-        frame = pending_frame_;
-        prior = pending_prior_;
-        pending_frame_.release();
-        pending_prior_.reset();
+      std::unique_lock<std::mutex> lock(mutex_);
+      condition_.wait(lock, [this] { return stop_.load() || pending_; });
+      if (stop_.load()) {
+        break;
       }
-    }
-
-    if (frame.empty()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      continue;
+      pending_ = false;
+      busy_ = true;
+      ++stats_.started;
+      packet = std::move(pending_packet_);
+      prior = std::move(pending_prior_);
+      pending_packet_ = FramePacket{};
+      pending_prior_.reset();
     }
 
     const double start = NowSeconds();
     InferTimings timings;
     std::string error;
-    auto detection = detector_->Infer(frame, prior, &timings, &error);
+    auto detection = detector_->Infer(packet.frame, prior, &timings, &error);
     const double end = NowSeconds();
     const double inst_fps = 1.0 / std::max(1e-6, end - start);
     smoothed_infer_fps_ = SmoothValue(smoothed_infer_fps_, inst_fps, 0.15);
+    if (completion_window_start_ <= 0.0) {
+      completion_window_start_ = end;
+      completion_window_count_ = 1;
+    } else {
+      ++completion_window_count_;
+      const double window_seconds = end - completion_window_start_;
+      if (window_seconds >= 0.25) {
+        const double actual_fps =
+            static_cast<double>(completion_window_count_ - 1) /
+            window_seconds;
+        smoothed_actual_fps_ =
+            SmoothValue(smoothed_actual_fps_, actual_fps, 0.50);
+        completion_window_start_ = end;
+        completion_window_count_ = 1;
+      }
+    }
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
       ++sequence_;
       latest_result_.seq = sequence_;
+      latest_result_.source_frame_seq = packet.seq;
+      latest_result_.source_capture_ts = packet.capture_done_ts;
+      latest_result_.infer_start_ts = start;
+      latest_result_.infer_done_ts = end;
       latest_result_.detection = detection;
       latest_result_.infer_fps = smoothed_infer_fps_;
+      latest_result_.actual_fps = smoothed_actual_fps_;
       latest_result_.timestamp = end;
       latest_result_.timings = timings;
       busy_ = false;
+      ++stats_.completed;
     }
 
     if (!error.empty()) {
