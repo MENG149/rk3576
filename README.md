@@ -106,3 +106,4 @@ ctest --test-dir cpp_fast_targeting/tests/build --output-on-failure
 ## 文档
 
 当前指南和历史资料统一收录在 docs/，入口见 docs/README.md。性能优化细节见 docs/reports/RK3576_矩形识别修复与性能优化报告_2026-07-12.md。
+我觉得练习git是
